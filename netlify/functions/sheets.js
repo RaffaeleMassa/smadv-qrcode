@@ -5,13 +5,12 @@ export async function handler(event) {
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
   };
 
-  // Preflight
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: corsHeaders, body: "" };
   }
 
   try {
-    const endpoint = process.env.SHEETS_ENDPOINT; // solo server-side
+    const endpoint = process.env.SHEETS_ENDPOINT;
     if (!endpoint) {
       return {
         statusCode: 500,
@@ -22,58 +21,53 @@ export async function handler(event) {
 
     const method = event.httpMethod;
 
-    // Forward querystring per GET
+    // querystring forward (GET)
     const qs = event.rawQueryString ? `?${event.rawQueryString}` : "";
-    const url = `${endpoint}${qs}`;
+    const forwardUrl = `${endpoint}${qs}`;
 
-    // GET pass-through
-    if (method === "GET") {
-      const res = await fetch(url, { method: "GET" });
-      const text = await res.text();
+    const upstreamRes =
+      method === "GET"
+        ? await fetch(forwardUrl, { method: "GET" })
+        : method === "POST"
+          ? await fetch(endpoint, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: event.body || "{}",
+            })
+          : null;
 
+    if (!upstreamRes) {
       return {
-        statusCode: res.status,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": res.headers.get("content-type") || "application/json",
-        },
-        body: text,
+        statusCode: 405,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({ ok: false, error: "Method not allowed" }),
       };
     }
 
-    // POST pass-through (salvataggio)
-    if (method === "POST") {
-      // ✅ Netlify può passare body in base64
-      let rawBody = event.body || "{}";
-      if (event.isBase64Encoded) {
-        rawBody = Buffer.from(rawBody, "base64").toString("utf8");
-      }
+    const contentType = upstreamRes.headers.get("content-type") || "";
+    const text = await upstreamRes.text();
 
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-        },
-        body: rawBody,
-      });
-
-      const text = await res.text();
-
+    // Se Apps Script torna HTML (error page), lo trasformo in JSON “pulito”
+    if (contentType.includes("text/html") || text.trim().startsWith("<!DOCTYPE html")) {
       return {
-        statusCode: res.status,
-        headers: {
-          ...corsHeaders,
-          "Content-Type": res.headers.get("content-type") || "application/json",
-        },
-        body: text,
+        statusCode: upstreamRes.status || 500,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ok: false,
+          error:
+            "Upstream (Google Apps Script) ha risposto HTML (probabile errore nel foglio o permessi). " +
+            "Controlla il tab 'QR' o il nome del foglio in Apps Script.",
+          upstreamStatus: upstreamRes.status,
+          upstreamPreview: text.slice(0, 300),
+        }),
       };
     }
 
+    // Pass-through normale
     return {
-      statusCode: 405,
-      headers: { ...corsHeaders, "Content-Type": "application/json" },
-      body: JSON.stringify({ ok: false, error: "Method not allowed" }),
+      statusCode: upstreamRes.status,
+      headers: { ...corsHeaders, "Content-Type": contentType || "application/json" },
+      body: text,
     };
   } catch (err) {
     return {
@@ -83,5 +77,3 @@ export async function handler(event) {
     };
   }
 }
-
-

@@ -5,12 +5,13 @@ export async function handler(event) {
     "Access-Control-Allow-Methods": "GET,POST,OPTIONS",
   };
 
+  // Preflight
   if (event.httpMethod === "OPTIONS") {
     return { statusCode: 204, headers: corsHeaders, body: "" };
   }
 
   try {
-    const endpoint = process.env.SHEETS_ENDPOINT; // SOLO server-side
+    const endpoint = process.env.SHEETS_ENDPOINT; // solo server-side
     if (!endpoint) {
       return {
         statusCode: 500,
@@ -21,42 +22,50 @@ export async function handler(event) {
 
     const method = event.httpMethod;
 
-    // forward querystring (GET + POST)
-    let qs = event.rawQueryString ? `?${event.rawQueryString}` : "";
-
-    // fallback: se non c'è qs ma nel body c'è action, aggiungilo
-    if (!qs && method === "POST" && event.body) {
-      try {
-        const parsed = JSON.parse(event.body);
-        if (parsed?.action) qs = `?action=${encodeURIComponent(parsed.action)}`;
-      } catch {
-        // ignore
-      }
-    }
-
+    // Forward querystring per GET
+    const qs = event.rawQueryString ? `?${event.rawQueryString}` : "";
     const url = `${endpoint}${qs}`;
 
+    // GET pass-through
     if (method === "GET") {
       const res = await fetch(url, { method: "GET" });
       const text = await res.text();
+
       return {
         statusCode: res.status,
-        headers: { ...corsHeaders, "Content-Type": res.headers.get("content-type") || "application/json" },
+        headers: {
+          ...corsHeaders,
+          "Content-Type": res.headers.get("content-type") || "application/json",
+        },
         body: text,
       };
     }
 
+    // POST pass-through (salvataggio)
     if (method === "POST") {
-      const res = await fetch(url, {
+      // ✅ Netlify può passare body in base64
+      let rawBody = event.body || "{}";
+      if (event.isBase64Encoded) {
+        rawBody = Buffer.from(rawBody, "base64").toString("utf8");
+      }
+
+      const res = await fetch(endpoint, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: event.body || "{}",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+        },
+        body: rawBody,
       });
 
       const text = await res.text();
+
       return {
         statusCode: res.status,
-        headers: { ...corsHeaders, "Content-Type": res.headers.get("content-type") || "application/json" },
+        headers: {
+          ...corsHeaders,
+          "Content-Type": res.headers.get("content-type") || "application/json",
+        },
         body: text,
       };
     }
@@ -74,4 +83,5 @@ export async function handler(event) {
     };
   }
 }
+
 

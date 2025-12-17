@@ -17,11 +17,19 @@ export default function Admin() {
   const [note, setNote] = useState("");
   const [status, setStatus] = useState("");
 
-  const baseUrl = useMemo(() => window.location.origin, []);
-  const qrUrl = `${baseUrl}/r/${code}`;
-
-  // ✅ Questo è l’endpoint "interno" Netlify (niente CORS)
+  // ✅ Endpoint Netlify Function (same-origin, no CORS)
   const API = "/.netlify/functions/sheets";
+
+  // ✅ Normalizzazione codice (sempre uguale ovunque)
+  const normalizedCode = useMemo(() => code.trim().toUpperCase(), [code]);
+
+  // ✅ baseUrl sicuro
+  const baseUrl = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    return window.location.origin;
+  }, []);
+
+  const qrUrl = `${baseUrl}/r/${normalizedCode}`;
 
   function downloadPng() {
     const canvas = canvasRef.current?.querySelector("canvas");
@@ -30,12 +38,22 @@ export default function Admin() {
     const pngUrl = canvas.toDataURL("image/png");
     const a = document.createElement("a");
     a.href = pngUrl;
-    a.download = `qrcode-${code}.png`;
+    a.download = `qrcode-${normalizedCode}.png`;
     a.click();
   }
 
+  async function safeReadJson(res) {
+    // Se Netlify risponde con HTML (errori), res.json() fallisce.
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { ok: false, error: `Risposta non JSON: ${text.slice(0, 180)}...` };
+    }
+  }
+
   async function saveToSheets() {
-    if (!code.trim() || !targetUrl.trim()) {
+    if (!normalizedCode || !targetUrl.trim()) {
       setStatus("⚠️ Inserisci Code e URL.");
       return;
     }
@@ -46,28 +64,30 @@ export default function Admin() {
       const res = await fetch(API, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "upsert", code, url: targetUrl, client, note 
-          
+        body: JSON.stringify({
+          action: "upsert",
+          code: normalizedCode,
+          url: targetUrl.trim(),
+          client: client?.trim() || "",
+          note: note?.trim() || "",
         }),
       });
-      
 
-    
-      const data = await res.json().catch(() => null);
+      const data = await safeReadJson(res);
 
       if (!res.ok || !data?.ok) {
-        setStatus(`❌ Errore salvataggio: ${data?.error || "response non valida"}`);
+        setStatus(`❌ Errore salvataggio: ${data?.error || `HTTP ${res.status}`}`);
         return;
       }
 
-      setStatus(`✅ Salvato: ${code.toUpperCase()} → ${targetUrl}`);
+      setStatus(`✅ Salvato: ${normalizedCode} → ${targetUrl.trim()}`);
     } catch (e) {
-      setStatus(`❌ Errore rete: ${String(e)}`);
+      setStatus(`❌ Errore rete: ${e?.message || String(e)}`);
     }
   }
 
   async function loadFromSheets() {
-    if (!code.trim()) {
+    if (!normalizedCode) {
       setStatus("⚠️ Inserisci un codice.");
       return;
     }
@@ -75,21 +95,22 @@ export default function Admin() {
     setStatus("Caricamento…");
 
     try {
-      const url = `${API}?action=get&code=${encodeURIComponent(code.trim().toUpperCase())}`;
-      const res = await fetch(`${API}?action=get&code=${encodeURIComponent(code)}`);
-      const data = await res.json();
+      const qs = `?action=get&code=${encodeURIComponent(normalizedCode)}`;
+      const res = await fetch(`${API}${qs}`, { method: "GET" });
 
-      if (!data?.ok) {
-        setStatus(`❌ Non trovato o errore: ${data?.error || "unknown"}`);
+      const data = await safeReadJson(res);
+
+      if (!res.ok || !data?.ok) {
+        setStatus(`❌ Non trovato o errore: ${data?.error || `HTTP ${res.status}`}`);
         return;
       }
 
       setTargetUrl(data.item?.url || "");
       setClient(data.item?.client || "");
       setNote(data.item?.note || "");
-      setStatus(`✅ Caricato da Sheets: ${code.toUpperCase()}`);
+      setStatus(`✅ Caricato da Sheets: ${normalizedCode}`);
     } catch (e) {
-      setStatus(`❌ Errore rete: ${String(e)}`);
+      setStatus(`❌ Errore rete: ${e?.message || String(e)}`);
     }
   }
 
@@ -169,7 +190,8 @@ export default function Admin() {
         >
           <div ref={canvasRef} style={{ display: "grid", justifyItems: "center", gap: 10 }}>
             <QRCodeCanvas value={qrUrl} size={240} includeMargin level="M" />
-            <div style={{ fontWeight: 800, letterSpacing: 1 }}>{code}</div>
+            <div style={{ fontWeight: 800, letterSpacing: 1 }}>{normalizedCode}</div>
+
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
               <button
                 onClick={downloadPng}
@@ -177,6 +199,7 @@ export default function Admin() {
               >
                 Scarica PNG
               </button>
+
               <button
                 onClick={saveToSheets}
                 style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}
@@ -189,11 +212,13 @@ export default function Admin() {
           <div style={{ display: "grid", gap: 8 }}>
             <div><b>QR URL:</b> {qrUrl}</div>
             <div><b>Destinazione:</b> {targetUrl}</div>
+
             {status && (
               <div style={{ marginTop: 8, padding: 10, borderRadius: 10, background: "#f6f6f6" }}>
                 {status}
               </div>
             )}
+
             <div style={{ opacity: 0.75 }}>
               Flusso: generi codice → salvi su Sheets → scarichi PNG → stampi etichetta.
               Se un domani cambi URL, ricarichi da Sheets, modifichi e risalvi.

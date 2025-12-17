@@ -35,7 +35,10 @@ export default function Admin() {
   }
 
   async function saveToSheets() {
-    if (!cleanCode || !String(targetUrl || "").trim()) {
+    const c = cleanCode;
+    const u = String(targetUrl || "").trim();
+
+    if (!c || !u) {
       setStatus("⚠️ Inserisci Code e URL.");
       return;
     }
@@ -48,36 +51,29 @@ export default function Admin() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "upsert",
-          code: cleanCode,
-          url: String(targetUrl).trim(),
-          client: String(client || "").trim(),
-          note: String(note || "").trim(),
+          code: c,
+          url: u,
+          client,
+          note,
         }),
       });
 
-      const text = await res.text();
-      let data = null;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        // se non è JSON, mostriamo un errore chiaro
-        setStatus(`❌ Errore salvataggio: risposta non valida`);
-        return;
-      }
+      const data = await res.json().catch(() => null);
 
       if (!res.ok || !data?.ok) {
         setStatus(`❌ Errore salvataggio: ${data?.error || "response non valida"}`);
         return;
       }
 
-      setStatus(`✅ Salvato: ${cleanCode} → ${targetUrl}`);
+      setStatus(`✅ Salvato: ${c} → ${u}`);
     } catch (e) {
       setStatus(`❌ Errore rete: ${String(e)}`);
     }
   }
 
   async function loadFromSheets() {
-    if (!cleanCode) {
+    const c = cleanCode;
+    if (!c) {
       setStatus("⚠️ Inserisci un codice.");
       return;
     }
@@ -85,7 +81,7 @@ export default function Admin() {
     setStatus("Caricamento…");
 
     try {
-      const res = await fetch(`${API}?action=get&code=${encodeURIComponent(cleanCode)}`);
+      const res = await fetch(`${API}?action=get&code=${encodeURIComponent(c)}`);
       const data = await res.json().catch(() => null);
 
       if (!res.ok || !data?.ok) {
@@ -96,7 +92,7 @@ export default function Admin() {
       setTargetUrl(data.item?.url || "");
       setClient(data.item?.client || "");
       setNote(data.item?.note || "");
-      setStatus(`✅ Caricato da Sheets: ${cleanCode}`);
+      setStatus(`✅ Caricato da Sheets: ${c}`);
     } catch (e) {
       setStatus(`❌ Errore rete: ${String(e)}`);
     }
@@ -179,6 +175,7 @@ export default function Admin() {
           <div ref={canvasRef} style={{ display: "grid", justifyItems: "center", gap: 10 }}>
             <QRCodeCanvas value={qrUrl} size={240} includeMargin level="M" />
             <div style={{ fontWeight: 800, letterSpacing: 1 }}>{cleanCode}</div>
+
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
               <button
                 onClick={downloadPng}
@@ -198,14 +195,15 @@ export default function Admin() {
           <div style={{ display: "grid", gap: 8 }}>
             <div><b>QR URL:</b> {qrUrl}</div>
             <div><b>Destinazione:</b> {targetUrl}</div>
+
             {status && (
               <div style={{ marginTop: 8, padding: 10, borderRadius: 10, background: "#f6f6f6" }}>
                 {status}
               </div>
             )}
+
             <div style={{ opacity: 0.75 }}>
               Flusso: generi codice → salvi su Sheets → scarichi PNG → stampi etichetta.
-              Se un domani cambi URL, ricarichi da Sheets, modifichi e risalvi.
             </div>
           </div>
         </div>

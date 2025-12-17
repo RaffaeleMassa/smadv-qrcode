@@ -10,6 +10,3 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     </BrowserRouter>
   </React.StrictMode>
 );
-
-console.log("ALL ENV:", import.meta.env);
-console.log("SHEETS:", import.meta.env.VITE_SHEETS_ENDPOINT);

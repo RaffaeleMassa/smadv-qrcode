@@ -17,11 +17,11 @@ export default function Admin() {
   const [note, setNote] = useState("");
   const [status, setStatus] = useState("");
 
-  const API = "/.netlify/functions/sheets";
-
   const baseUrl = useMemo(() => window.location.origin, []);
-  const normalizedCode = useMemo(() => (code || "").trim().toUpperCase(), [code]);
-  const qrUrl = `${baseUrl}/r/${normalizedCode}`;
+  const qrUrl = `${baseUrl}/r/${code}`;
+
+  // endpoint Netlify function (same-origin => niente CORS lato browser)
+  const API = "/.netlify/functions/sheets";
 
   function downloadPng() {
     const canvas = canvasRef.current?.querySelector("canvas");
@@ -30,31 +30,31 @@ export default function Admin() {
     const pngUrl = canvas.toDataURL("image/png");
     const a = document.createElement("a");
     a.href = pngUrl;
-    a.download = `qrcode-${normalizedCode || "CODE"}.png`;
+    a.download = `qrcode-${code}.png`;
     a.click();
   }
 
   async function saveToSheets() {
-    const c = normalizedCode;
-    const u = (targetUrl || "").trim();
+    const codeUp = code.trim().toUpperCase();
+    const urlTrim = targetUrl.trim();
 
-    if (!c || !u) {
-      setStatus("⚠️ Inserisci Codice e URL.");
+    if (!codeUp || !urlTrim) {
+      setStatus("⚠️ Inserisci Code e URL.");
       return;
     }
 
     setStatus("Salvataggio in corso…");
 
     try {
-      // ✅ action in querystring (compatibilità Apps Script)
+      // ✅ action anche in querystring (molti Apps Script leggono e.parameter.action)
       const res = await fetch(`${API}?action=upsert`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          code: c,
-          url: u,
-          client: (client || "").trim(),
-          note: (note || "").trim(),
+          code: codeUp,
+          url: urlTrim,
+          client: client.trim(),
+          note: note.trim(),
         }),
       });
 
@@ -62,27 +62,24 @@ export default function Admin() {
       let data = null;
       try {
         data = JSON.parse(text);
-      } catch {}
+      } catch {
+        // se arriva HTML/altro lo mostriamo nel messaggio
+      }
 
-      if (!res.ok) {
-        setStatus(`❌ Errore salvataggio: HTTP ${res.status} — ${text?.slice(0, 180) || "no body"}`);
+      if (!res.ok || !data?.ok) {
+        setStatus(`❌ Errore salvataggio: ${data?.error || text || "response non valida"}`);
         return;
       }
 
-      if (!data?.ok) {
-        setStatus(`❌ Errore salvataggio: ${data?.error || "risposta non valida"} — ${text?.slice(0, 180)}`);
-        return;
-      }
-
-      setStatus(`✅ Salvato: ${c} → ${u}`);
+      setStatus(`✅ Salvato: ${codeUp} → ${urlTrim}`);
     } catch (e) {
       setStatus(`❌ Errore rete: ${String(e)}`);
     }
   }
 
   async function loadFromSheets() {
-    const c = normalizedCode;
-    if (!c) {
+    const codeUp = code.trim().toUpperCase();
+    if (!codeUp) {
       setStatus("⚠️ Inserisci un codice.");
       return;
     }
@@ -90,29 +87,21 @@ export default function Admin() {
     setStatus("Caricamento…");
 
     try {
-      const res = await fetch(`${API}?action=get&code=${encodeURIComponent(c)}`, { method: "GET" });
+      const res = await fetch(`${API}?action=get&code=${encodeURIComponent(codeUp)}`);
       const text = await res.text();
-      let data = null;
-      try {
-        data = JSON.parse(text);
-      } catch {}
-
-      if (!res.ok) {
-        setStatus(`❌ Errore caricamento: HTTP ${res.status} — ${text?.slice(0, 180) || "no body"}`);
-        return;
-      }
+      const data = JSON.parse(text);
 
       if (!data?.ok) {
-        setStatus(`❌ Non trovato o errore: ${data?.error || "unknown"} — ${text?.slice(0, 180)}`);
+        setStatus(`❌ Non trovato o errore: ${data?.error || "unknown"}`);
         return;
       }
 
       setTargetUrl(data.item?.url || "");
       setClient(data.item?.client || "");
       setNote(data.item?.note || "");
-      setStatus(`✅ Caricato da Sheets: ${c}`);
+      setStatus(`✅ Caricato da Sheets: ${codeUp}`);
     } catch (e) {
-      setStatus(`❌ Errore rete: ${String(e)}`);
+      setStatus(`❌ Errore rete/parse: ${String(e)}`);
     }
   }
 
@@ -128,7 +117,7 @@ export default function Admin() {
           <span>Codice</span>
           <div style={{ display: "flex", gap: 10 }}>
             <input
-              value={normalizedCode}
+              value={code}
               onChange={(e) => setCode(e.target.value.toUpperCase())}
               style={{ flex: 1, padding: 10, borderRadius: 10, border: "1px solid #ddd" }}
             />
@@ -192,8 +181,7 @@ export default function Admin() {
         >
           <div ref={canvasRef} style={{ display: "grid", justifyItems: "center", gap: 10 }}>
             <QRCodeCanvas value={qrUrl} size={240} includeMargin level="M" />
-            <div style={{ fontWeight: 800, letterSpacing: 1 }}>{normalizedCode}</div>
-
+            <div style={{ fontWeight: 800, letterSpacing: 1 }}>{code.trim().toUpperCase()}</div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
               <button
                 onClick={downloadPng}
@@ -213,13 +201,11 @@ export default function Admin() {
           <div style={{ display: "grid", gap: 8 }}>
             <div><b>QR URL:</b> {qrUrl}</div>
             <div><b>Destinazione:</b> {targetUrl}</div>
-
             {status && (
-              <div style={{ marginTop: 8, padding: 10, borderRadius: 10, background: "#f6f6f6", whiteSpace: "pre-wrap" }}>
+              <div style={{ marginTop: 8, padding: 10, borderRadius: 10, background: "#f6f6f6" }}>
                 {status}
               </div>
             )}
-
             <div style={{ opacity: 0.75 }}>
               Flusso: generi codice → salvi su Sheets → scarichi PNG → stampi etichetta.
               Se un domani cambi URL, ricarichi da Sheets, modifichi e risalvi.

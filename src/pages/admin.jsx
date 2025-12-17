@@ -23,85 +23,78 @@ export default function Admin() {
   // endpoint Netlify function (same-origin => niente CORS lato browser)
   const API = "/.netlify/functions/sheets";
 
-  function downloadPng() {
-    const canvas = canvasRef.current?.querySelector("canvas");
-    if (!canvas) return;
-
-    const pngUrl = canvas.toDataURL("image/png");
-    const a = document.createElement("a");
-    a.href = pngUrl;
-    a.download = `qrcode-${code}.png`;
-    a.click();
-  }
-
   async function saveToSheets() {
-    const codeUp = code.trim().toUpperCase();
-    const urlTrim = targetUrl.trim();
-
-    if (!codeUp || !urlTrim) {
+    const cleanCode = code.trim().toUpperCase();
+    const cleanUrl = targetUrl.trim();
+  
+    if (!cleanCode || !cleanUrl) {
       setStatus("⚠️ Inserisci Code e URL.");
       return;
     }
-
+  
     setStatus("Salvataggio in corso…");
-
+  
     try {
-      // ✅ action anche in querystring (molti Apps Script leggono e.parameter.action)
+      const body = new URLSearchParams({
+        code: cleanCode,
+        url: cleanUrl,
+        client: client?.trim() || "",
+        note: note?.trim() || "",
+      });
+  
       const res = await fetch(`${API}?action=upsert`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          code: codeUp,
-          url: urlTrim,
-          client: client.trim(),
-          note: note.trim(),
-        }),
+        headers: { "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8" },
+        body: body.toString(),
       });
-
+  
       const text = await res.text();
-      let data = null;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        // se arriva HTML/altro lo mostriamo nel messaggio
-      }
-
+      const data = (() => {
+        try { return JSON.parse(text); } catch { return null; }
+      })();
+  
       if (!res.ok || !data?.ok) {
         setStatus(`❌ Errore salvataggio: ${data?.error || text || "response non valida"}`);
         return;
       }
-
-      setStatus(`✅ Salvato: ${codeUp} → ${urlTrim}`);
+  
+      setCode(cleanCode);
+      setTargetUrl(cleanUrl);
+      setStatus(`✅ Salvato: ${cleanCode} → ${cleanUrl}`);
     } catch (e) {
       setStatus(`❌ Errore rete: ${String(e)}`);
     }
   }
-
+  
   async function loadFromSheets() {
-    const codeUp = code.trim().toUpperCase();
-    if (!codeUp) {
+    const cleanCode = code.trim().toUpperCase();
+  
+    if (!cleanCode) {
       setStatus("⚠️ Inserisci un codice.");
       return;
     }
-
+  
     setStatus("Caricamento…");
-
+  
     try {
-      const res = await fetch(`${API}?action=get&code=${encodeURIComponent(codeUp)}`);
+      const res = await fetch(`${API}?action=get&code=${encodeURIComponent(cleanCode)}`);
       const text = await res.text();
-      const data = JSON.parse(text);
-
-      if (!data?.ok) {
-        setStatus(`❌ Non trovato o errore: ${data?.error || "unknown"}`);
+      const data = (() => {
+        try { return JSON.parse(text); } catch { return null; }
+      })();
+  
+      if (!res.ok || !data?.ok) {
+        setStatus(`❌ Non trovato o errore: ${data?.error || text || "unknown"}`);
         return;
       }
-
+  
+      setCode(cleanCode);
       setTargetUrl(data.item?.url || "");
       setClient(data.item?.client || "");
       setNote(data.item?.note || "");
-      setStatus(`✅ Caricato da Sheets: ${codeUp}`);
+      setStatus(`✅ Caricato da Sheets: ${cleanCode}`);
     } catch (e) {
-      setStatus(`❌ Errore rete/parse: ${String(e)}`);
+      setStatus(`❌ Errore rete: ${String(e)}`);
     }
   }
 

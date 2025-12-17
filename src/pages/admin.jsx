@@ -8,10 +8,6 @@ function randomCode(len = 6) {
   return out;
 }
 
-function normCode(v) {
-  return String(v || "").trim().toUpperCase();
-}
-
 export default function Admin() {
   const canvasRef = useRef(null);
 
@@ -22,26 +18,24 @@ export default function Admin() {
   const [status, setStatus] = useState("");
 
   const baseUrl = useMemo(() => window.location.origin, []);
-  const qrUrl = `${baseUrl}/r/${normCode(code)}`;
+  const cleanCode = String(code || "").trim().toUpperCase();
+  const qrUrl = `${baseUrl}/r/${cleanCode}`;
 
-  // Endpoint Netlify Function (no CORS lato browser)
   const API = "/.netlify/functions/sheets";
 
   function downloadPng() {
     const canvas = canvasRef.current?.querySelector("canvas");
     if (!canvas) return;
+
     const pngUrl = canvas.toDataURL("image/png");
     const a = document.createElement("a");
     a.href = pngUrl;
-    a.download = `qrcode-${normCode(code)}.png`;
+    a.download = `qrcode-${cleanCode}.png`;
     a.click();
   }
 
   async function saveToSheets() {
-    const c = normCode(code);
-    const u = String(targetUrl || "").trim();
-
-    if (!c || !u) {
+    if (!cleanCode || !String(targetUrl || "").trim()) {
       setStatus("⚠️ Inserisci Code e URL.");
       return;
     }
@@ -54,44 +48,36 @@ export default function Admin() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "upsert",
-          code: c,
-          url: u,
+          code: cleanCode,
+          url: String(targetUrl).trim(),
           client: String(client || "").trim(),
           note: String(note || "").trim(),
         }),
       });
 
-      const contentType = res.headers.get("content-type") || "";
-      const raw = await res.text();
-
-      // Se arriva HTML da Apps Script, lo facciamo vedere chiaramente
-      if (contentType.includes("text/html") || raw.trim().startsWith("<!DOCTYPE html")) {
-        setStatus("❌ Errore salvataggio: risposta HTML da upstream (Apps Script). Controlla permessi/Sheet name.");
+      const text = await res.text();
+      let data = null;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        // se non è JSON, mostriamo un errore chiaro
+        setStatus(`❌ Errore salvataggio: risposta non valida`);
         return;
       }
-
-      const data = (() => {
-        try {
-          return JSON.parse(raw);
-        } catch {
-          return null;
-        }
-      })();
 
       if (!res.ok || !data?.ok) {
-        setStatus(`❌ Errore salvataggio: ${data?.error || raw || "response non valida"}`);
+        setStatus(`❌ Errore salvataggio: ${data?.error || "response non valida"}`);
         return;
       }
 
-      setStatus(`✅ Salvato: ${c} → ${u}`);
+      setStatus(`✅ Salvato: ${cleanCode} → ${targetUrl}`);
     } catch (e) {
       setStatus(`❌ Errore rete: ${String(e)}`);
     }
   }
 
   async function loadFromSheets() {
-    const c = normCode(code);
-    if (!c) {
+    if (!cleanCode) {
       setStatus("⚠️ Inserisci un codice.");
       return;
     }
@@ -99,10 +85,10 @@ export default function Admin() {
     setStatus("Caricamento…");
 
     try {
-      const res = await fetch(`${API}?action=get&code=${encodeURIComponent(c)}`);
-      const data = await res.json();
+      const res = await fetch(`${API}?action=get&code=${encodeURIComponent(cleanCode)}`);
+      const data = await res.json().catch(() => null);
 
-      if (!data?.ok) {
+      if (!res.ok || !data?.ok) {
         setStatus(`❌ Non trovato o errore: ${data?.error || "unknown"}`);
         return;
       }
@@ -110,7 +96,7 @@ export default function Admin() {
       setTargetUrl(data.item?.url || "");
       setClient(data.item?.client || "");
       setNote(data.item?.note || "");
-      setStatus(`✅ Caricato da Sheets: ${c}`);
+      setStatus(`✅ Caricato da Sheets: ${cleanCode}`);
     } catch (e) {
       setStatus(`❌ Errore rete: ${String(e)}`);
     }
@@ -128,8 +114,8 @@ export default function Admin() {
           <span>Codice</span>
           <div style={{ display: "flex", gap: 10 }}>
             <input
-              value={code}
-              onChange={(e) => setCode(normCode(e.target.value))}
+              value={cleanCode}
+              onChange={(e) => setCode(e.target.value.toUpperCase())}
               style={{ flex: 1, padding: 10, borderRadius: 10, border: "1px solid #ddd" }}
             />
             <button
@@ -192,7 +178,7 @@ export default function Admin() {
         >
           <div ref={canvasRef} style={{ display: "grid", justifyItems: "center", gap: 10 }}>
             <QRCodeCanvas value={qrUrl} size={240} includeMargin level="M" />
-            <div style={{ fontWeight: 800, letterSpacing: 1 }}>{normCode(code)}</div>
+            <div style={{ fontWeight: 800, letterSpacing: 1 }}>{cleanCode}</div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
               <button
                 onClick={downloadPng}

@@ -1,5 +1,5 @@
 import { Routes, Route, Navigate } from "react-router-dom";
-import Admin from "./pages/admin.jsx";
+import Admin from "./pages/Admin.jsx";
 import Redirect from "./pages/Redirect.jsx";
 
 export default function App() {

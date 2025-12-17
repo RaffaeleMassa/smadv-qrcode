@@ -5,52 +5,45 @@ export default function Redirect() {
   const { code } = useParams();
   const [msg, setMsg] = useState("Caricamento…");
 
-  // endpoint interno Netlify (no CORS)
   const API = "/.netlify/functions/sheets";
 
   useEffect(() => {
-    const run = async () => {
-      const cleanCode = String(code || "").trim().toUpperCase();
-      if (!cleanCode) {
-        setMsg("Codice non valido. Contatta SM ADV");
-        return;
-      }
+    const codeUp = String(code || "").trim().toUpperCase();
+    if (!codeUp) {
+      setMsg("Codice non valido. Contatta SM ADV");
+      return;
+    }
 
+    (async () => {
       try {
-        const res = await fetch(`${API}?action=get&code=${encodeURIComponent(cleanCode)}`, {
-          method: "GET",
-          headers: { Accept: "application/json" },
-        });
-
+        const res = await fetch(`${API}?action=get&code=${encodeURIComponent(codeUp)}`);
         const text = await res.text();
 
-        // se Google Apps Script ha risposto HTML -> errore
-        if ((res.headers.get("content-type") || "").includes("text/html") || text.trim().startsWith("<!DOCTYPE")) {
-          setMsg("Errore lettura codice. Contatta SM ADV");
-          return;
+        let data;
+        try {
+          data = JSON.parse(text);
+        } catch {
+          data = null;
         }
 
-        const data = JSON.parse(text);
-
-        if (!data?.ok || !data?.item?.url) {
+        if (!res.ok || !data?.ok || !data?.item?.url) {
           setMsg("Codice non trovato. Contatta SM ADV");
           return;
         }
 
-        // redirect finale
-        window.location.replace(data.item.url);
+        const url = String(data.item.url).trim();
+        // redirect “hard”
+        window.location.replace(url);
       } catch (e) {
-        setMsg("Errore di rete. Contatta SM ADV");
+        setMsg("Errore rete. Contatta SM ADV");
       }
-    };
-
-    run();
+    })();
   }, [code]);
 
   return (
-    <div style={{ fontFamily: "system-ui", padding: 24 }}>
+    <div style={{ fontFamily: "system-ui", padding: 40, textAlign: "center" }}>
       <h2 style={{ margin: 0 }}>SM ADV</h2>
-      <p style={{ opacity: 0.8 }}>{msg}</p>
+      <div style={{ marginTop: 8 }}>{msg}</div>
     </div>
   );
 }

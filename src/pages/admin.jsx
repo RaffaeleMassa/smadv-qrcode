@@ -18,10 +18,10 @@ export default function Admin() {
   const [status, setStatus] = useState("");
 
   const baseUrl = useMemo(() => window.location.origin, []);
-  const cleanCode = (code || "").trim().toUpperCase();
-  const qrUrl = `${baseUrl}/r/${cleanCode}`;
+  const normalizedCode = (code || "").trim().toUpperCase();
+  const qrUrl = `${baseUrl}/r/${normalizedCode}`;
 
-  // endpoint Netlify function (stesso dominio -> no CORS)
+  // Endpoint Netlify (same-origin, niente CORS)
   const API = "/.netlify/functions/sheets";
 
   function downloadPng() {
@@ -31,15 +31,12 @@ export default function Admin() {
     const pngUrl = canvas.toDataURL("image/png");
     const a = document.createElement("a");
     a.href = pngUrl;
-    a.download = `qrcode-${cleanCode || "qr"}.png`;
+    a.download = `qrcode-${normalizedCode}.png`;
     a.click();
   }
 
   async function saveToSheets() {
-    const c = (code || "").trim().toUpperCase();
-    const u = (targetUrl || "").trim();
-
-    if (!c || !u) {
+    if (!normalizedCode || !targetUrl.trim()) {
       setStatus("⚠️ Inserisci Codice e URL.");
       return;
     }
@@ -47,52 +44,33 @@ export default function Admin() {
     setStatus("Salvataggio in corso…");
 
     try {
-      const payload = {
-        action: "upsert",
-        code: c,
-        url: u,
-        client: (client || "").trim(),
-        note: (note || "").trim(),
-      };
-
       const res = await fetch(API, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-        },
-        body: JSON.stringify(payload),
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "upsert",
+          code: normalizedCode,
+          url: targetUrl.trim(),
+          client: client?.trim() || "",
+          note: note?.trim() || "",
+        }),
       });
 
-      const text = await res.text();
+      const data = await res.json().catch(() => null);
 
-      // prova JSON, altrimenti mostra testo
-      let data = null;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        data = null;
-      }
-
-      if (!res.ok) {
-        setStatus(`❌ Errore salvataggio: HTTP ${res.status} — ${data?.error || text || "risposta non valida"}`);
+      if (!res.ok || !data?.ok) {
+        setStatus(`❌ Errore salvataggio: ${data?.error || "Risposta non valida"}`);
         return;
       }
 
-      if (!data?.ok) {
-        setStatus(`❌ Errore salvataggio: ${data?.error || text || "risposta non valida"}`);
-        return;
-      }
-
-      setStatus(`✅ Salvato: ${c} → ${u}`);
+      setStatus(`✅ Salvato: ${normalizedCode} → ${targetUrl.trim()}`);
     } catch (e) {
       setStatus(`❌ Errore rete: ${String(e)}`);
     }
   }
 
   async function loadFromSheets() {
-    const c = (code || "").trim().toUpperCase();
-    if (!c) {
+    if (!normalizedCode) {
       setStatus("⚠️ Inserisci un codice.");
       return;
     }
@@ -100,25 +78,10 @@ export default function Admin() {
     setStatus("Caricamento…");
 
     try {
-      const res = await fetch(`${API}?action=get&code=${encodeURIComponent(c)}`, {
-        method: "GET",
-        headers: { "Accept": "application/json" },
-      });
+      const res = await fetch(`${API}?action=get&code=${encodeURIComponent(normalizedCode)}`);
+      const data = await res.json().catch(() => null);
 
-      const text = await res.text();
-      let data = null;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        data = null;
-      }
-
-      if (!res.ok) {
-        setStatus(`❌ Errore: HTTP ${res.status} — ${data?.error || text || "risposta non valida"}`);
-        return;
-      }
-
-      if (!data?.ok) {
+      if (!res.ok || !data?.ok) {
         setStatus(`❌ Non trovato o errore: ${data?.error || "unknown"}`);
         return;
       }
@@ -126,7 +89,7 @@ export default function Admin() {
       setTargetUrl(data.item?.url || "");
       setClient(data.item?.client || "");
       setNote(data.item?.note || "");
-      setStatus(`✅ Caricato da Sheets: ${c}`);
+      setStatus(`✅ Caricato da Sheets: ${normalizedCode}`);
     } catch (e) {
       setStatus(`❌ Errore rete: ${String(e)}`);
     }
@@ -169,7 +132,7 @@ export default function Admin() {
             value={targetUrl}
             onChange={(e) => setTargetUrl(e.target.value)}
             placeholder="https://..."
-            style={{ padding: `10px`, borderRadius: 10, border: "1px solid #ddd" }}
+            style={{ padding: 10, borderRadius: 10, border: "1px solid #ddd" }}
           />
         </label>
 
@@ -208,7 +171,7 @@ export default function Admin() {
         >
           <div ref={canvasRef} style={{ display: "grid", justifyItems: "center", gap: 10 }}>
             <QRCodeCanvas value={qrUrl} size={240} includeMargin level="M" />
-            <div style={{ fontWeight: 800, letterSpacing: 1 }}>{cleanCode}</div>
+            <div style={{ fontWeight: 800, letterSpacing: 1 }}>{normalizedCode}</div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
               <button
                 onClick={downloadPng}
@@ -226,15 +189,13 @@ export default function Admin() {
           </div>
 
           <div style={{ display: "grid", gap: 8 }}>
-            <div><b>URL QR:</b> {qrUrl}</div>
+            <div><b>QR URL:</b> {qrUrl}</div>
             <div><b>Destinazione:</b> {targetUrl}</div>
-
             {status && (
-              <div style={{ marginTop: 8, padding: 10, borderRadius: 10, background: "#f6f6f6", whiteSpace: "pre-wrap" }}>
+              <div style={{ marginTop: 8, padding: 10, borderRadius: 10, background: "#f6f6f6" }}>
                 {status}
               </div>
             )}
-
             <div style={{ opacity: 0.75 }}>
               Flusso: generi codice → salvi su Sheets → scarichi PNG → stampi etichetta.
               Se un domani cambi URL, ricarichi da Sheets, modifichi e risalvi.

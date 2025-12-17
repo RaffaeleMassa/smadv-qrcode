@@ -8,6 +8,10 @@ function randomCode(len = 6) {
   return out;
 }
 
+function normCode(v) {
+  return String(v || "").trim().toUpperCase();
+}
+
 export default function Admin() {
   const canvasRef = useRef(null);
 
@@ -18,26 +22,27 @@ export default function Admin() {
   const [status, setStatus] = useState("");
 
   const baseUrl = useMemo(() => window.location.origin, []);
-  const normalizedCode = (code || "").trim().toUpperCase();
-  const qrUrl = `${baseUrl}/r/${normalizedCode}`;
+  const qrUrl = `${baseUrl}/r/${normCode(code)}`;
 
-  // Endpoint Netlify (same-origin, niente CORS)
+  // Endpoint Netlify Function (no CORS lato browser)
   const API = "/.netlify/functions/sheets";
 
   function downloadPng() {
     const canvas = canvasRef.current?.querySelector("canvas");
     if (!canvas) return;
-
     const pngUrl = canvas.toDataURL("image/png");
     const a = document.createElement("a");
     a.href = pngUrl;
-    a.download = `qrcode-${normalizedCode}.png`;
+    a.download = `qrcode-${normCode(code)}.png`;
     a.click();
   }
 
   async function saveToSheets() {
-    if (!normalizedCode || !targetUrl.trim()) {
-      setStatus("⚠️ Inserisci Codice e URL.");
+    const c = normCode(code);
+    const u = String(targetUrl || "").trim();
+
+    if (!c || !u) {
+      setStatus("⚠️ Inserisci Code e URL.");
       return;
     }
 
@@ -49,28 +54,44 @@ export default function Admin() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "upsert",
-          code: normalizedCode,
-          url: targetUrl.trim(),
-          client: client?.trim() || "",
-          note: note?.trim() || "",
+          code: c,
+          url: u,
+          client: String(client || "").trim(),
+          note: String(note || "").trim(),
         }),
       });
 
-      const data = await res.json().catch(() => null);
+      const contentType = res.headers.get("content-type") || "";
+      const raw = await res.text();
 
-      if (!res.ok || !data?.ok) {
-        setStatus(`❌ Errore salvataggio: ${data?.error || "Risposta non valida"}`);
+      // Se arriva HTML da Apps Script, lo facciamo vedere chiaramente
+      if (contentType.includes("text/html") || raw.trim().startsWith("<!DOCTYPE html")) {
+        setStatus("❌ Errore salvataggio: risposta HTML da upstream (Apps Script). Controlla permessi/Sheet name.");
         return;
       }
 
-      setStatus(`✅ Salvato: ${normalizedCode} → ${targetUrl.trim()}`);
+      const data = (() => {
+        try {
+          return JSON.parse(raw);
+        } catch {
+          return null;
+        }
+      })();
+
+      if (!res.ok || !data?.ok) {
+        setStatus(`❌ Errore salvataggio: ${data?.error || raw || "response non valida"}`);
+        return;
+      }
+
+      setStatus(`✅ Salvato: ${c} → ${u}`);
     } catch (e) {
       setStatus(`❌ Errore rete: ${String(e)}`);
     }
   }
 
   async function loadFromSheets() {
-    if (!normalizedCode) {
+    const c = normCode(code);
+    if (!c) {
       setStatus("⚠️ Inserisci un codice.");
       return;
     }
@@ -78,10 +99,10 @@ export default function Admin() {
     setStatus("Caricamento…");
 
     try {
-      const res = await fetch(`${API}?action=get&code=${encodeURIComponent(normalizedCode)}`);
-      const data = await res.json().catch(() => null);
+      const res = await fetch(`${API}?action=get&code=${encodeURIComponent(c)}`);
+      const data = await res.json();
 
-      if (!res.ok || !data?.ok) {
+      if (!data?.ok) {
         setStatus(`❌ Non trovato o errore: ${data?.error || "unknown"}`);
         return;
       }
@@ -89,7 +110,7 @@ export default function Admin() {
       setTargetUrl(data.item?.url || "");
       setClient(data.item?.client || "");
       setNote(data.item?.note || "");
-      setStatus(`✅ Caricato da Sheets: ${normalizedCode}`);
+      setStatus(`✅ Caricato da Sheets: ${c}`);
     } catch (e) {
       setStatus(`❌ Errore rete: ${String(e)}`);
     }
@@ -108,7 +129,7 @@ export default function Admin() {
           <div style={{ display: "flex", gap: 10 }}>
             <input
               value={code}
-              onChange={(e) => setCode(e.target.value.toUpperCase())}
+              onChange={(e) => setCode(normCode(e.target.value))}
               style={{ flex: 1, padding: 10, borderRadius: 10, border: "1px solid #ddd" }}
             />
             <button
@@ -171,7 +192,7 @@ export default function Admin() {
         >
           <div ref={canvasRef} style={{ display: "grid", justifyItems: "center", gap: 10 }}>
             <QRCodeCanvas value={qrUrl} size={240} includeMargin level="M" />
-            <div style={{ fontWeight: 800, letterSpacing: 1 }}>{normalizedCode}</div>
+            <div style={{ fontWeight: 800, letterSpacing: 1 }}>{normCode(code)}</div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
               <button
                 onClick={downloadPng}

@@ -1,49 +1,41 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 
+const API = "/.netlify/functions/sheets";
+
 export default function Redirect() {
   const { code } = useParams();
-  const [msg, setMsg] = useState("Caricamento…");
-
-  const API = "/.netlify/functions/sheets";
+  const [msg, setMsg] = useState("Reindirizzamento…");
 
   useEffect(() => {
-    const codeUp = String(code || "").trim().toUpperCase();
-    if (!codeUp) {
+    const c = String(code || "").trim().toUpperCase();
+    if (!c) {
       setMsg("Codice non valido. Contatta SM ADV");
       return;
     }
 
     (async () => {
       try {
-        const res = await fetch(`${API}?action=get&code=${encodeURIComponent(codeUp)}`);
-        const text = await res.text();
-
-        let data;
-        try {
-          data = JSON.parse(text);
-        } catch {
-          data = null;
-        }
+        const res = await fetch(`${API}?action=get&code=${encodeURIComponent(c)}`);
+        const data = await res.json().catch(() => null);
 
         if (!res.ok || !data?.ok || !data?.item?.url) {
           setMsg("Codice non trovato. Contatta SM ADV");
           return;
         }
 
-        const url = String(data.item.url).trim();
-        // redirect “hard”
-        window.location.replace(url);
+        // redirect “hard” (evita problemi SPA)
+        window.location.replace(data.item.url);
       } catch (e) {
-        setMsg("Errore rete. Contatta SM ADV");
+        setMsg("Errore di rete. Contatta SM ADV");
       }
     })();
   }, [code]);
 
   return (
-    <div style={{ fontFamily: "system-ui", padding: 40, textAlign: "center" }}>
-      <h2 style={{ margin: 0 }}>SM ADV</h2>
-      <div style={{ marginTop: 8 }}>{msg}</div>
+    <div style={{ fontFamily: "system-ui", padding: 30, textAlign: "center" }}>
+      <h2>SM ADV</h2>
+      <p>{msg}</p>
     </div>
   );
 }

@@ -8,7 +8,7 @@ export default function App() {
       <Route path="/" element={<Navigate to="/admin" replace />} />
       <Route path="/admin" element={<Admin />} />
       <Route path="/r/:code" element={<Redirect />} />
-      <Route path="*" element={<Navigate to="/admin" replace />} />
+      <Route path="*" element={<div style={{ padding: 24 }}>404</div>} />
     </Routes>
   );
 }

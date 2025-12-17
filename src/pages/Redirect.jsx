@@ -1,30 +1,43 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 
-const API = "/.netlify/functions/sheets";
-
-export default function Redirector() {
+export default function Redirect() {
   const { code } = useParams();
   const [msg, setMsg] = useState("Caricamento…");
 
+  // endpoint interno Netlify (no CORS)
+  const API = "/.netlify/functions/sheets";
+
   useEffect(() => {
     const run = async () => {
-      const clean = String(code || "").trim().toUpperCase();
-      if (!clean) {
+      const cleanCode = String(code || "").trim().toUpperCase();
+      if (!cleanCode) {
         setMsg("Codice non valido. Contatta SM ADV");
         return;
       }
 
       try {
-        const res = await fetch(`${API}?action=get&code=${encodeURIComponent(clean)}`);
-        const data = await res.json().catch(() => null);
+        const res = await fetch(`${API}?action=get&code=${encodeURIComponent(cleanCode)}`, {
+          method: "GET",
+          headers: { Accept: "application/json" },
+        });
 
-        if (!res.ok || !data?.ok || !data?.item?.url) {
+        const text = await res.text();
+
+        // se Google Apps Script ha risposto HTML -> errore
+        if ((res.headers.get("content-type") || "").includes("text/html") || text.trim().startsWith("<!DOCTYPE")) {
+          setMsg("Errore lettura codice. Contatta SM ADV");
+          return;
+        }
+
+        const data = JSON.parse(text);
+
+        if (!data?.ok || !data?.item?.url) {
           setMsg("Codice non trovato. Contatta SM ADV");
           return;
         }
 
-        // redirect vero
+        // redirect finale
         window.location.replace(data.item.url);
       } catch (e) {
         setMsg("Errore di rete. Contatta SM ADV");
@@ -35,9 +48,9 @@ export default function Redirector() {
   }, [code]);
 
   return (
-    <div style={{ fontFamily: "system-ui", padding: 24, maxWidth: 720, margin: "0 auto" }}>
-      <h2 style={{ marginTop: 0 }}>SM ADV</h2>
-      <p>{msg}</p>
+    <div style={{ fontFamily: "system-ui", padding: 24 }}>
+      <h2 style={{ margin: 0 }}>SM ADV</h2>
+      <p style={{ opacity: 0.8 }}>{msg}</p>
     </div>
   );
 }

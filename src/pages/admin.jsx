@@ -8,8 +8,21 @@ function randomCode(len = 6) {
   return out;
 }
 
-function normalizeCode(v) {
-  return String(v || "").trim().toUpperCase();
+function safeUpper(v) {
+  return (v || "").trim().toUpperCase();
+}
+
+async function readJsonOrText(res) {
+  const text = await res.text();
+  let json = null;
+
+  try {
+    json = JSON.parse(text);
+  } catch (_) {
+    // non è JSON, va bene: torniamo text per debug
+  }
+
+  return { text, json };
 }
 
 export default function Admin() {
@@ -22,10 +35,9 @@ export default function Admin() {
   const [status, setStatus] = useState("");
 
   const baseUrl = useMemo(() => window.location.origin, []);
-  const normalizedCode = useMemo(() => normalizeCode(code), [code]);
-  const qrUrl = `${baseUrl}/r/${normalizedCode}`;
+  const qrUrl = `${baseUrl}/r/${safeUpper(code)}`;
 
-  // Endpoint interno Netlify (niente CORS dal browser)
+  // Endpoint Netlify Function
   const API = "/.netlify/functions/sheets";
 
   function downloadPng() {
@@ -35,24 +47,15 @@ export default function Admin() {
     const pngUrl = canvas.toDataURL("image/png");
     const a = document.createElement("a");
     a.href = pngUrl;
-    a.download = `qrcode-${normalizedCode}.png`;
+    a.download = `qrcode-${safeUpper(code)}.png`;
     a.click();
   }
 
-  async function safeJson(res) {
-    const text = await res.text();
-    try {
-      return { json: JSON.parse(text), text };
-    } catch {
-      return { json: null, text };
-    }
-  }
-
   async function saveToSheets() {
-    const c = normalizedCode;
-    const u = String(targetUrl || "").trim();
+    const CODE = safeUpper(code);
+    const URL = (targetUrl || "").trim();
 
-    if (!c || !u) {
+    if (!CODE || !URL) {
       setStatus("⚠️ Inserisci Code e URL.");
       return;
     }
@@ -62,38 +65,44 @@ export default function Admin() {
     try {
       const res = await fetch(API, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+        },
+        cache: "no-store",
         body: JSON.stringify({
           action: "upsert",
-          code: c,
-          url: u,
-          client: String(client || "").trim(),
-          note: String(note || "").trim(),
+          code: CODE,
+          url: URL,
+          client: (client || "").trim(),
+          note: (note || "").trim(),
         }),
       });
 
-      const { json, text } = await safeJson(res);
+      const { json, text } = await readJsonOrText(res);
 
+      // Se non è ok HTTP, mostra status + body (per capire subito l’errore)
       if (!res.ok) {
-        setStatus(`❌ Errore salvataggio: HTTP ${res.status} ${json?.error ? `- ${json.error}` : ""}`.trim());
+        setStatus(`❌ Errore salvataggio: HTTP ${res.status} – ${text?.slice(0, 200) || "no body"}`);
         return;
       }
 
+      // Se è ok HTTP ma non è JSON ok:true, mostra il body (spesso è HTML/redirect)
       if (!json?.ok) {
-        setStatus(`❌ Errore salvataggio: ${json?.error || "response non valida"}${text ? "" : ""}`);
+        setStatus(`❌ Errore salvataggio: risposta non valida – ${text?.slice(0, 200) || "empty"}`);
         return;
       }
 
-      setStatus(`✅ Salvato: ${c} → ${u}`);
+      setStatus(`✅ Salvato: ${CODE} → ${URL}`);
     } catch (e) {
-      setStatus(`❌ Errore rete: ${String(e?.message || e)}`);
+      setStatus(`❌ Errore rete: ${String(e)}`);
     }
   }
 
   async function loadFromSheets() {
-    const c = normalizedCode;
+    const CODE = safeUpper(code);
 
-    if (!c) {
+    if (!CODE) {
       setStatus("⚠️ Inserisci un codice.");
       return;
     }
@@ -101,28 +110,31 @@ export default function Admin() {
     setStatus("Caricamento…");
 
     try {
-      const res = await fetch(`${API}?action=get&code=${encodeURIComponent(c)}`, {
+      const qs = `?action=get&code=${encodeURIComponent(CODE)}`;
+      const res = await fetch(`${API}${qs}`, {
         method: "GET",
+        headers: { "Accept": "application/json" },
+        cache: "no-store",
       });
 
-      const { json } = await safeJson(res);
+      const { json, text } = await readJsonOrText(res);
 
       if (!res.ok) {
-        setStatus(`❌ Errore caricamento: HTTP ${res.status}${json?.error ? ` - ${json.error}` : ""}`);
+        setStatus(`❌ Errore load: HTTP ${res.status} – ${text?.slice(0, 200) || "no body"}`);
         return;
       }
 
       if (!json?.ok) {
-        setStatus(`❌ Non trovato o errore: ${json?.error || "unknown"}`);
+        setStatus(`❌ Non trovato o errore: ${json?.error || text?.slice(0, 200) || "unknown"}`);
         return;
       }
 
       setTargetUrl(json.item?.url || "");
       setClient(json.item?.client || "");
       setNote(json.item?.note || "");
-      setStatus(`✅ Caricato da Sheets: ${c}`);
+      setStatus(`✅ Caricato da Sheets: ${CODE}`);
     } catch (e) {
-      setStatus(`❌ Errore rete: ${String(e?.message || e)}`);
+      setStatus(`❌ Errore rete: ${String(e)}`);
     }
   }
 
@@ -138,8 +150,8 @@ export default function Admin() {
           <span>Codice</span>
           <div style={{ display: "flex", gap: 10 }}>
             <input
-              value={normalizedCode}
-              onChange={(e) => setCode(normalizeCode(e.target.value))}
+              value={code}
+              onChange={(e) => setCode(e.target.value.toUpperCase())}
               style={{ flex: 1, padding: 10, borderRadius: 10, border: "1px solid #ddd" }}
             />
             <button
@@ -202,7 +214,7 @@ export default function Admin() {
         >
           <div ref={canvasRef} style={{ display: "grid", justifyItems: "center", gap: 10 }}>
             <QRCodeCanvas value={qrUrl} size={240} includeMargin level="M" />
-            <div style={{ fontWeight: 800, letterSpacing: 1 }}>{normalizedCode}</div>
+            <div style={{ fontWeight: 800, letterSpacing: 1 }}>{safeUpper(code)}</div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
               <button
                 onClick={downloadPng}
@@ -222,13 +234,11 @@ export default function Admin() {
           <div style={{ display: "grid", gap: 8 }}>
             <div><b>QR URL:</b> {qrUrl}</div>
             <div><b>Destinazione:</b> {targetUrl}</div>
-
             {status && (
               <div style={{ marginTop: 8, padding: 10, borderRadius: 10, background: "#f6f6f6" }}>
                 {status}
               </div>
             )}
-
             <div style={{ opacity: 0.75 }}>
               Flusso: generi codice → salvi su Sheets → scarichi PNG → stampi etichetta.
               Se un domani cambi URL, ricarichi da Sheets, modifichi e risalvi.
@@ -239,3 +249,4 @@ export default function Admin() {
     </div>
   );
 }
+

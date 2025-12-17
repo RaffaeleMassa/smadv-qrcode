@@ -10,7 +10,7 @@ export async function handler(event) {
   }
 
   try {
-    const endpoint = process.env.SHEETS_ENDPOINT;
+    const endpoint = process.env.SHEETS_ENDPOINT; // SOLO server-side
     if (!endpoint) {
       return {
         statusCode: 500,
@@ -20,7 +20,20 @@ export async function handler(event) {
     }
 
     const method = event.httpMethod;
-    const qs = event.rawQueryString ? `?${event.rawQueryString}` : "";
+
+    // forward querystring (GET + POST)
+    let qs = event.rawQueryString ? `?${event.rawQueryString}` : "";
+
+    // fallback: se non c'è qs ma nel body c'è action, aggiungilo
+    if (!qs && method === "POST" && event.body) {
+      try {
+        const parsed = JSON.parse(event.body);
+        if (parsed?.action) qs = `?action=${encodeURIComponent(parsed.action)}`;
+      } catch {
+        // ignore
+      }
+    }
+
     const url = `${endpoint}${qs}`;
 
     if (method === "GET") {
@@ -34,15 +47,10 @@ export async function handler(event) {
     }
 
     if (method === "POST") {
-      const body =
-        event.isBase64Encoded && event.body
-          ? Buffer.from(event.body, "base64").toString("utf8")
-          : (event.body || "{}");
-
-      const res = await fetch(url, { // ✅ qui: url (con qs) e non endpoint
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body,
+        body: event.body || "{}",
       });
 
       const text = await res.text();
@@ -66,3 +74,4 @@ export async function handler(event) {
     };
   }
 }
+

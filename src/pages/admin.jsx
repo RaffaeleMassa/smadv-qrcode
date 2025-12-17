@@ -8,6 +8,10 @@ function randomCode(len = 6) {
   return out;
 }
 
+function normalizeCode(v) {
+  return String(v || "").trim().toUpperCase();
+}
+
 export default function Admin() {
   const canvasRef = useRef(null);
 
@@ -17,19 +21,12 @@ export default function Admin() {
   const [note, setNote] = useState("");
   const [status, setStatus] = useState("");
 
-  // ✅ Endpoint Netlify Function (same-origin, no CORS)
-  const API = "/.netlify/functions/sheets";
-
-  // ✅ Normalizzazione codice (sempre uguale ovunque)
-  const normalizedCode = useMemo(() => code.trim().toUpperCase(), [code]);
-
-  // ✅ baseUrl sicuro
-  const baseUrl = useMemo(() => {
-    if (typeof window === "undefined") return "";
-    return window.location.origin;
-  }, []);
-
+  const baseUrl = useMemo(() => window.location.origin, []);
+  const normalizedCode = useMemo(() => normalizeCode(code), [code]);
   const qrUrl = `${baseUrl}/r/${normalizedCode}`;
+
+  // Endpoint interno Netlify (niente CORS dal browser)
+  const API = "/.netlify/functions/sheets";
 
   function downloadPng() {
     const canvas = canvasRef.current?.querySelector("canvas");
@@ -42,18 +39,20 @@ export default function Admin() {
     a.click();
   }
 
-  async function safeReadJson(res) {
-    // Se Netlify risponde con HTML (errori), res.json() fallisce.
+  async function safeJson(res) {
     const text = await res.text();
     try {
-      return JSON.parse(text);
+      return { json: JSON.parse(text), text };
     } catch {
-      return { ok: false, error: `Risposta non JSON: ${text.slice(0, 180)}...` };
+      return { json: null, text };
     }
   }
 
   async function saveToSheets() {
-    if (!normalizedCode || !targetUrl.trim()) {
+    const c = normalizedCode;
+    const u = String(targetUrl || "").trim();
+
+    if (!c || !u) {
       setStatus("⚠️ Inserisci Code e URL.");
       return;
     }
@@ -66,28 +65,35 @@ export default function Admin() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "upsert",
-          code: normalizedCode,
-          url: targetUrl.trim(),
-          client: client?.trim() || "",
-          note: note?.trim() || "",
+          code: c,
+          url: u,
+          client: String(client || "").trim(),
+          note: String(note || "").trim(),
         }),
       });
 
-      const data = await safeReadJson(res);
+      const { json, text } = await safeJson(res);
 
-      if (!res.ok || !data?.ok) {
-        setStatus(`❌ Errore salvataggio: ${data?.error || `HTTP ${res.status}`}`);
+      if (!res.ok) {
+        setStatus(`❌ Errore salvataggio: HTTP ${res.status} ${json?.error ? `- ${json.error}` : ""}`.trim());
         return;
       }
 
-      setStatus(`✅ Salvato: ${normalizedCode} → ${targetUrl.trim()}`);
+      if (!json?.ok) {
+        setStatus(`❌ Errore salvataggio: ${json?.error || "response non valida"}${text ? "" : ""}`);
+        return;
+      }
+
+      setStatus(`✅ Salvato: ${c} → ${u}`);
     } catch (e) {
-      setStatus(`❌ Errore rete: ${e?.message || String(e)}`);
+      setStatus(`❌ Errore rete: ${String(e?.message || e)}`);
     }
   }
 
   async function loadFromSheets() {
-    if (!normalizedCode) {
+    const c = normalizedCode;
+
+    if (!c) {
       setStatus("⚠️ Inserisci un codice.");
       return;
     }
@@ -95,22 +101,28 @@ export default function Admin() {
     setStatus("Caricamento…");
 
     try {
-      const qs = `?action=get&code=${encodeURIComponent(normalizedCode)}`;
-      const res = await fetch(`${API}${qs}`, { method: "GET" });
+      const res = await fetch(`${API}?action=get&code=${encodeURIComponent(c)}`, {
+        method: "GET",
+      });
 
-      const data = await safeReadJson(res);
+      const { json } = await safeJson(res);
 
-      if (!res.ok || !data?.ok) {
-        setStatus(`❌ Non trovato o errore: ${data?.error || `HTTP ${res.status}`}`);
+      if (!res.ok) {
+        setStatus(`❌ Errore caricamento: HTTP ${res.status}${json?.error ? ` - ${json.error}` : ""}`);
         return;
       }
 
-      setTargetUrl(data.item?.url || "");
-      setClient(data.item?.client || "");
-      setNote(data.item?.note || "");
-      setStatus(`✅ Caricato da Sheets: ${normalizedCode}`);
+      if (!json?.ok) {
+        setStatus(`❌ Non trovato o errore: ${json?.error || "unknown"}`);
+        return;
+      }
+
+      setTargetUrl(json.item?.url || "");
+      setClient(json.item?.client || "");
+      setNote(json.item?.note || "");
+      setStatus(`✅ Caricato da Sheets: ${c}`);
     } catch (e) {
-      setStatus(`❌ Errore rete: ${e?.message || String(e)}`);
+      setStatus(`❌ Errore rete: ${String(e?.message || e)}`);
     }
   }
 
@@ -126,8 +138,8 @@ export default function Admin() {
           <span>Codice</span>
           <div style={{ display: "flex", gap: 10 }}>
             <input
-              value={code}
-              onChange={(e) => setCode(e.target.value.toUpperCase())}
+              value={normalizedCode}
+              onChange={(e) => setCode(normalizeCode(e.target.value))}
               style={{ flex: 1, padding: 10, borderRadius: 10, border: "1px solid #ddd" }}
             />
             <button
@@ -191,7 +203,6 @@ export default function Admin() {
           <div ref={canvasRef} style={{ display: "grid", justifyItems: "center", gap: 10 }}>
             <QRCodeCanvas value={qrUrl} size={240} includeMargin level="M" />
             <div style={{ fontWeight: 800, letterSpacing: 1 }}>{normalizedCode}</div>
-
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
               <button
                 onClick={downloadPng}
@@ -199,7 +210,6 @@ export default function Admin() {
               >
                 Scarica PNG
               </button>
-
               <button
                 onClick={saveToSheets}
                 style={{ padding: "10px 14px", borderRadius: 10, border: "1px solid #ddd", cursor: "pointer" }}

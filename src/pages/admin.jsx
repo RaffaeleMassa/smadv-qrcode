@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { QRCodeCanvas } from "qrcode.react";
 
 function randomCode(len = 6) {
@@ -17,12 +17,11 @@ export default function Admin() {
   const [note, setNote] = useState("");
   const [status, setStatus] = useState("");
 
-  const baseUrl = useMemo(() => window.location.origin, []);
-  const normalizedCode = (code || "").trim().toUpperCase();
-  const qrUrl = `${baseUrl}/r/${encodeURIComponent(normalizedCode)}`;
-
-  // endpoint Netlify Function (niente CORS lato browser)
   const API = "/.netlify/functions/sheets";
+
+  const baseUrl = useMemo(() => window.location.origin, []);
+  const cleanCode = useMemo(() => String(code || "").toUpperCase().trim(), [code]);
+  const qrUrl = useMemo(() => `${baseUrl}/r/${cleanCode}`, [baseUrl, cleanCode]);
 
   function downloadPng() {
     const canvas = canvasRef.current?.querySelector("canvas");
@@ -31,16 +30,32 @@ export default function Admin() {
     const pngUrl = canvas.toDataURL("image/png");
     const a = document.createElement("a");
     a.href = pngUrl;
-    a.download = `qrcode-${normalizedCode || "CODE"}.png`;
+    a.download = `qrcode-${cleanCode || "code"}.png`;
     a.click();
   }
 
-  async function saveToSheets() {
-    const c = normalizedCode;
-    const u = (targetUrl || "").trim();
+  async function safeJson(res) {
+    const ct = res.headers.get("content-type") || "";
+    const text = await res.text();
 
-    if (!c || !u) {
-      setStatus("⚠️ Inserisci Code e URL.");
+    // Se arriva HTML (errore Apps Script), lo segnaliamo bene
+    if (!ct.includes("application/json")) {
+      return { __notJson: true, text, contentType: ct };
+    }
+
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { __notJson: true, text, contentType: ct };
+    }
+  }
+
+  async function saveToSheets() {
+    const c = cleanCode;
+    const url = String(targetUrl || "").trim();
+
+    if (!c || !url) {
+      setStatus("⚠️ Inserisci Codice e URL.");
       return;
     }
 
@@ -53,26 +68,17 @@ export default function Admin() {
         body: JSON.stringify({
           action: "upsert",
           code: c,
-          url: u,
-          client: (client || "").trim(),
-          note: (note || "").trim(),
+          url,
+          client: String(client || "").trim(),
+          note: String(note || "").trim(),
         }),
       });
 
-      const ct = res.headers.get("content-type") || "";
-      const text = await res.text();
+      const data = await safeJson(res);
 
-      // Se Apps Script risponde HTML, lo mostriamo chiaro
-      if (ct.includes("text/html") || text.startsWith("<!DOCTYPE html")) {
-        setStatus("❌ Errore salvataggio: risposta HTML dal backend (controlla Apps Script / permessi / sheet).");
+      if (data?.__notJson) {
+        setStatus("❌ Errore salvataggio: risposta non JSON (Apps Script ha risposto HTML). Controlla permessi / sheet.");
         return;
-      }
-
-      let data = null;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        data = null;
       }
 
       if (!res.ok || !data?.ok) {
@@ -80,14 +86,14 @@ export default function Admin() {
         return;
       }
 
-      setStatus(`✅ Salvato: ${c} → ${u}`);
+      setStatus(`✅ Salvato: ${c} → ${url}`);
     } catch (e) {
       setStatus(`❌ Errore rete: ${String(e)}`);
     }
   }
 
   async function loadFromSheets() {
-    const c = normalizedCode;
+    const c = cleanCode;
     if (!c) {
       setStatus("⚠️ Inserisci un codice.");
       return;
@@ -96,16 +102,13 @@ export default function Admin() {
     setStatus("Caricamento…");
 
     try {
-      const res = await fetch(`${API}?action=get&code=${encodeURIComponent(c)}`);
-      const ct = res.headers.get("content-type") || "";
-      const text = await res.text();
+      const res = await fetch(`${API}?action=get&code=${encodeURIComponent(c)}`, { method: "GET" });
+      const data = await safeJson(res);
 
-      if (ct.includes("text/html") || text.startsWith("<!DOCTYPE html")) {
-        setStatus("❌ Errore: risposta HTML dal backend (Apps Script/permessi/sheet).");
+      if (data?.__notJson) {
+        setStatus("❌ Errore: risposta non JSON (Apps Script HTML). Controlla endpoint/permessi.");
         return;
       }
-
-      const data = JSON.parse(text);
 
       if (!data?.ok) {
         setStatus(`❌ Non trovato o errore: ${data?.error || "unknown"}`);
@@ -123,9 +126,9 @@ export default function Admin() {
 
   return (
     <div style={{ maxWidth: 860, margin: "40px auto", padding: 16, fontFamily: "system-ui" }}>
-      <h1 style={{ marginBottom: 6 }}>Amministrazione QR (SM ADV)</h1>
+      <h1 style={{ marginBottom: 6 }}>QR Admin (SM ADV)</h1>
       <p style={{ marginTop: 0, opacity: 0.75 }}>
-        Il QR punta a <b>{qrUrl}</b> e il reindirizzamento lo gestisci da Google Sheets.
+        Il QR punta a <b>{qrUrl}</b> e il redirect lo gestisci da Google Sheets.
       </p>
 
       <div style={{ display: "grid", gap: 12, marginTop: 18 }}>
@@ -197,7 +200,8 @@ export default function Admin() {
         >
           <div ref={canvasRef} style={{ display: "grid", justifyItems: "center", gap: 10 }}>
             <QRCodeCanvas value={qrUrl} size={240} includeMargin level="M" />
-            <div style={{ fontWeight: 800, letterSpacing: 1 }}>{normalizedCode}</div>
+            <div style={{ fontWeight: 800, letterSpacing: 1 }}>{cleanCode}</div>
+
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
               <button
                 onClick={downloadPng}
@@ -226,7 +230,7 @@ export default function Admin() {
 
             <div style={{ opacity: 0.75 }}>
               Flusso: scegli/costruisci codice → salvi su Fogli → scarichi PNG → stampi etichetta.
-              Se un domani cambia URL, modifica su Sheets e il QR resta lo stesso.
+              Se un domani cambi URL, modifichi su Sheets e il QR resta lo stesso.
             </div>
           </div>
         </div>

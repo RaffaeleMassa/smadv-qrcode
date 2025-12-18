@@ -18,8 +18,8 @@ export default function Admin() {
   const [status, setStatus] = useState("");
 
   const baseUrl = useMemo(() => window.location.origin, []);
-  const codeUp = (code || "").trim().toUpperCase();
-  const qrUrl = `${baseUrl}/r/${codeUp}`;
+  const normalizedCode = (code || "").trim().toUpperCase();
+  const qrUrl = `${baseUrl}/r/${encodeURIComponent(normalizedCode)}`;
 
   // endpoint Netlify Function
   const API = "/.netlify/functions/sheets";
@@ -31,14 +31,16 @@ export default function Admin() {
     const pngUrl = canvas.toDataURL("image/png");
     const a = document.createElement("a");
     a.href = pngUrl;
-    a.download = `qrcode-${codeUp || "code"}.png`;
+    a.download = `qrcode-${normalizedCode}.png`;
     a.click();
   }
 
   async function saveToSheets() {
-    const url = (targetUrl || "").trim();
-    if (!codeUp || !url) {
-      setStatus("⚠️ Inserisci Code e URL.");
+    const c = normalizedCode;
+    const u = (targetUrl || "").trim();
+
+    if (!c || !u) {
+      setStatus("⚠️ Inserisci Codice e URL.");
       return;
     }
 
@@ -50,34 +52,38 @@ export default function Admin() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           action: "upsert",
-          code: codeUp,
-          url,
-          client: (client || "").trim(),
-          note: (note || "").trim(),
+          code: c,
+          url: u,
+          client,
+          note,
         }),
       });
 
+      const contentType = res.headers.get("content-type") || "";
       const text = await res.text();
-      let data = null;
-      try {
-        data = JSON.parse(text);
-      } catch {
-        data = null;
-      }
 
-      if (!res.ok || !data?.ok) {
-        setStatus(`❌ Errore salvataggio: ${data?.error || text || "response non valida"}`);
+      // Se Apps Script risponde con HTML, te lo segnalo chiaro
+      if (contentType.includes("text/html") || text.startsWith("<!DOCTYPE html")) {
+        setStatus("❌ Errore salvataggio: risposta HTML (controlla Apps Script / foglio / permessi).");
         return;
       }
 
-      setStatus(`✅ Salvato: ${codeUp} → ${url}`);
+      const data = JSON.parse(text);
+
+      if (!res.ok || !data?.ok) {
+        setStatus(`❌ Errore salvataggio: ${data?.error || "response non valida"}`);
+        return;
+      }
+
+      setStatus(`✅ Salvato: ${c} → ${u}`);
     } catch (e) {
       setStatus(`❌ Errore rete: ${String(e)}`);
     }
   }
 
   async function loadFromSheets() {
-    if (!codeUp) {
+    const c = normalizedCode;
+    if (!c) {
       setStatus("⚠️ Inserisci un codice.");
       return;
     }
@@ -85,8 +91,17 @@ export default function Admin() {
     setStatus("Caricamento…");
 
     try {
-      const res = await fetch(`${API}?action=get&code=${encodeURIComponent(codeUp)}`);
+      const url = `${API}?action=get&code=${encodeURIComponent(c)}`;
+      const res = await fetch(url);
+
+      const contentType = res.headers.get("content-type") || "";
       const text = await res.text();
+
+      if (contentType.includes("text/html") || text.startsWith("<!DOCTYPE html")) {
+        setStatus("❌ Errore: risposta HTML (Apps Script / foglio / permessi).");
+        return;
+      }
+
       const data = JSON.parse(text);
 
       if (!data?.ok) {
@@ -97,7 +112,7 @@ export default function Admin() {
       setTargetUrl(data.item?.url || "");
       setClient(data.item?.client || "");
       setNote(data.item?.note || "");
-      setStatus(`✅ Caricato da Sheets: ${codeUp}`);
+      setStatus(`✅ Caricato da Sheets: ${c}`);
     } catch (e) {
       setStatus(`❌ Errore rete: ${String(e)}`);
     }
@@ -112,7 +127,7 @@ export default function Admin() {
 
       <div style={{ display: "grid", gap: 12, marginTop: 18 }}>
         <label style={{ display: "grid", gap: 6 }}>
-          <span>Codice</span>
+          <span>Codice (puoi anche sceglierlo tu)</span>
           <div style={{ display: "flex", gap: 10 }}>
             <input
               value={code}
@@ -179,7 +194,7 @@ export default function Admin() {
         >
           <div ref={canvasRef} style={{ display: "grid", justifyItems: "center", gap: 10 }}>
             <QRCodeCanvas value={qrUrl} size={240} includeMargin level="M" />
-            <div style={{ fontWeight: 800, letterSpacing: 1 }}>{codeUp}</div>
+            <div style={{ fontWeight: 800, letterSpacing: 1 }}>{normalizedCode}</div>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "center" }}>
               <button
                 onClick={downloadPng}
@@ -199,14 +214,16 @@ export default function Admin() {
           <div style={{ display: "grid", gap: 8 }}>
             <div><b>QR URL:</b> {qrUrl}</div>
             <div><b>Destinazione:</b> {targetUrl}</div>
+
             {status && (
               <div style={{ marginTop: 8, padding: 10, borderRadius: 10, background: "#f6f6f6" }}>
                 {status}
               </div>
             )}
+
             <div style={{ opacity: 0.75 }}>
-              Flusso: generi codice → salvi su Sheets → scarichi PNG → stampi etichetta.
-              Se un domani cambi URL, ricarichi da Sheets, modifichi e risalvi.
+              Flusso: scegli/costruisci codice → salvi su Sheets → scarichi PNG → stampi etichetta.
+              Se un domani cambi URL, modifichi su Sheets e il QR resta lo stesso.
             </div>
           </div>
         </div>

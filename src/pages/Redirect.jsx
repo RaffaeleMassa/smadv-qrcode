@@ -1,58 +1,43 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 
 export default function Redirect() {
   const { code } = useParams();
   const [msg, setMsg] = useState("Caricamento…");
 
-  const API = "/.netlify/functions/sheets";
-
-  const cleanCode = useMemo(() => String(code || "").toUpperCase().trim(), [code]);
-
   useEffect(() => {
-    let alive = true;
+    const c = String(code || "").trim().toUpperCase();
+    if (!c) {
+      setMsg("Codice non valido. Contatta SM ADV");
+      return;
+    }
 
-    async function run() {
-      if (!cleanCode) {
-        setMsg("Codice non valido. Contatta SM ADV");
-        return;
-      }
+    const API = "/.netlify/functions/sheets";
 
+    (async () => {
       try {
-        const res = await fetch(`${API}?action=get&code=${encodeURIComponent(cleanCode)}`, { method: "GET" });
-        const ct = res.headers.get("content-type") || "";
+        const res = await fetch(`${API}?action=get&code=${encodeURIComponent(c)}`);
         const text = await res.text();
+        let data = null;
+        try { data = JSON.parse(text); } catch {}
 
-        if (!ct.includes("application/json")) {
-          if (!alive) return;
-          setMsg("Errore interno (Sheets). Contatta SM ADV");
-          return;
-        }
-
-        const data = JSON.parse(text);
-
-        if (!data?.ok || !data?.item?.url) {
-          if (!alive) return;
+        if (!res.ok || !data?.ok || !data?.item?.url) {
           setMsg("Codice non trovato. Contatta SM ADV");
           return;
         }
 
-        // Redirect
+        // redirect
         window.location.replace(data.item.url);
       } catch (e) {
-        if (!alive) return;
-        setMsg("Errore rete. Contatta SM ADV");
+        setMsg("Errore di rete. Contatta SM ADV");
       }
-    }
-
-    run();
-    return () => { alive = false; };
-  }, [cleanCode]);
+    })();
+  }, [code]);
 
   return (
-    <div style={{ fontFamily: "system-ui", textAlign: "center", padding: "60px 16px" }}>
-      <h2 style={{ marginBottom: 10 }}>SM ADV</h2>
-      <div style={{ opacity: 0.9 }}>{msg}</div>
+    <div style={{ fontFamily: "system-ui", padding: 28, textAlign: "center" }}>
+      <h2 style={{ marginBottom: 8 }}>SM ADV</h2>
+      <div>{msg}</div>
     </div>
   );
 }

@@ -12,7 +12,7 @@ export default function Admin() {
   const wrapRef = useRef(null);
 
   const [code, setCode] = useState(() => randomCode(6));
-  const [targetUrl, setTargetUrl] = useState("https://www.smadv.it/");
+  const [targetUrl, setTargetUrl] = useState("");
   const [client, setClient] = useState("");
   const [note, setNote] = useState("");
   const [status, setStatus] = useState("");

@@ -21,7 +21,7 @@ export default function Admin() {
   const normalizedCode = (code || "").trim().toUpperCase();
   const qrUrl = `${baseUrl}/r/${encodeURIComponent(normalizedCode)}`;
 
-  // endpoint Netlify Function
+  // endpoint Netlify Function (niente CORS lato browser)
   const API = "/.netlify/functions/sheets";
 
   function downloadPng() {
@@ -31,7 +31,7 @@ export default function Admin() {
     const pngUrl = canvas.toDataURL("image/png");
     const a = document.createElement("a");
     a.href = pngUrl;
-    a.download = `qrcode-${normalizedCode}.png`;
+    a.download = `qrcode-${normalizedCode || "CODE"}.png`;
     a.click();
   }
 
@@ -40,7 +40,7 @@ export default function Admin() {
     const u = (targetUrl || "").trim();
 
     if (!c || !u) {
-      setStatus("⚠️ Inserisci Codice e URL.");
+      setStatus("⚠️ Inserisci Code e URL.");
       return;
     }
 
@@ -54,21 +54,26 @@ export default function Admin() {
           action: "upsert",
           code: c,
           url: u,
-          client,
-          note,
+          client: (client || "").trim(),
+          note: (note || "").trim(),
         }),
       });
 
-      const contentType = res.headers.get("content-type") || "";
+      const ct = res.headers.get("content-type") || "";
       const text = await res.text();
 
-      // Se Apps Script risponde con HTML, te lo segnalo chiaro
-      if (contentType.includes("text/html") || text.startsWith("<!DOCTYPE html")) {
-        setStatus("❌ Errore salvataggio: risposta HTML (controlla Apps Script / foglio / permessi).");
+      // Se Apps Script risponde HTML, lo mostriamo chiaro
+      if (ct.includes("text/html") || text.startsWith("<!DOCTYPE html")) {
+        setStatus("❌ Errore salvataggio: risposta HTML dal backend (controlla Apps Script / permessi / sheet).");
         return;
       }
 
-      const data = JSON.parse(text);
+      let data = null;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        data = null;
+      }
 
       if (!res.ok || !data?.ok) {
         setStatus(`❌ Errore salvataggio: ${data?.error || "response non valida"}`);
@@ -91,14 +96,12 @@ export default function Admin() {
     setStatus("Caricamento…");
 
     try {
-      const url = `${API}?action=get&code=${encodeURIComponent(c)}`;
-      const res = await fetch(url);
-
-      const contentType = res.headers.get("content-type") || "";
+      const res = await fetch(`${API}?action=get&code=${encodeURIComponent(c)}`);
+      const ct = res.headers.get("content-type") || "";
       const text = await res.text();
 
-      if (contentType.includes("text/html") || text.startsWith("<!DOCTYPE html")) {
-        setStatus("❌ Errore: risposta HTML (Apps Script / foglio / permessi).");
+      if (ct.includes("text/html") || text.startsWith("<!DOCTYPE html")) {
+        setStatus("❌ Errore: risposta HTML dal backend (Apps Script/permessi/sheet).");
         return;
       }
 
@@ -120,9 +123,9 @@ export default function Admin() {
 
   return (
     <div style={{ maxWidth: 860, margin: "40px auto", padding: 16, fontFamily: "system-ui" }}>
-      <h1 style={{ marginBottom: 6 }}>QR Admin (SM ADV)</h1>
+      <h1 style={{ marginBottom: 6 }}>Amministrazione QR (SM ADV)</h1>
       <p style={{ marginTop: 0, opacity: 0.75 }}>
-        Il QR punta a <b>{qrUrl}</b> e il redirect lo gestisci da Google Sheets.
+        Il QR punta a <b>{qrUrl}</b> e il reindirizzamento lo gestisci da Google Sheets.
       </p>
 
       <div style={{ display: "grid", gap: 12, marginTop: 18 }}>
@@ -161,7 +164,7 @@ export default function Admin() {
 
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
           <label style={{ display: "grid", gap: 6 }}>
-            <span>Cliente (opzionale)</span>
+            <span>Cliente (facoltativo)</span>
             <input
               value={client}
               onChange={(e) => setClient(e.target.value)}
@@ -171,7 +174,7 @@ export default function Admin() {
           </label>
 
           <label style={{ display: "grid", gap: 6 }}>
-            <span>Note (opzionale)</span>
+            <span>Nota (facoltativa)</span>
             <input
               value={note}
               onChange={(e) => setNote(e.target.value)}
@@ -212,7 +215,7 @@ export default function Admin() {
           </div>
 
           <div style={{ display: "grid", gap: 8 }}>
-            <div><b>QR URL:</b> {qrUrl}</div>
+            <div><b>URL QR:</b> <a href={qrUrl} target="_blank" rel="noreferrer">{qrUrl}</a></div>
             <div><b>Destinazione:</b> {targetUrl}</div>
 
             {status && (
@@ -222,8 +225,8 @@ export default function Admin() {
             )}
 
             <div style={{ opacity: 0.75 }}>
-              Flusso: scegli/costruisci codice → salvi su Sheets → scarichi PNG → stampi etichetta.
-              Se un domani cambi URL, modifichi su Sheets e il QR resta lo stesso.
+              Flusso: scegli/costruisci codice → salvi su Fogli → scarichi PNG → stampi etichetta.
+              Se un domani cambia URL, modifica su Sheets e il QR resta lo stesso.
             </div>
           </div>
         </div>

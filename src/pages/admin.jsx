@@ -77,32 +77,32 @@ export default function Admin() {
   }
 
   async function loadFromSheets() {
-    const c = normCode;
+    const c = (code || "").trim().toUpperCase();
     if (!c) {
       setStatus("⚠️ Inserisci un codice.");
       return;
     }
-
+  
     setStatus("Caricamento…");
-
+  
     try {
-      const res = await fetch(`${API}?action=get&code=${encodeURIComponent(c)}`);
-      const text = await res.text();
-      let data = null;
-      try { data = JSON.parse(text); } catch {}
-
+      const res = await fetch(
+        `/.netlify/functions/sheets?action=get&code=${encodeURIComponent(c)}`
+      );
+  
+      const data = await res.json();
+  
       if (!data?.ok) {
-        const preview = text?.slice(0, 180);
-        setStatus(`❌ Non trovato o errore: ${data?.error || preview || "unknown"}`);
+        setStatus(`❌ Non trovato o errore: ${data?.error || "unknown"}`);
         return;
       }
-
-      setTargetUrl(data.item?.url || "");
-      setClient(data.item?.client || "");
-      setNote(data.item?.note || "");
+  
+      setTargetUrl(data.item.url || "");
+      setClient(data.item.client || "");
+      setNote(data.item.note || "");
       setStatus(`✅ Caricato da Sheets: ${c}`);
     } catch (e) {
-      setStatus(`❌ Errore rete: ${String(e)}`);
+      setStatus(`❌ Errore rete`);
     }
   }
 
